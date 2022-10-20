@@ -4,7 +4,7 @@ Based on https://github.com/adafruit/Adafruit_Learning_System_Guides/tree/main/M
 
 There are many support libraries required for this code to run. Adafruit Arcada did not support the RP2040. I will try to reference which ones files changed and point out and include what needs to be done in case the changes are not included upstream (and in many cases until I can polish it, for good reason!).
 
-I had to manually download the latest version of Adafruit TinyUSB Arduino.
+I had to manually download the latest version of Adafruit TinyUSB Arduino. There is some weird behavior that seems to come from having a Serial connection over USB while also mounting mass storage. It (mostly) works.
 
 This is a work in progress!
 
