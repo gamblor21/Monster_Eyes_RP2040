@@ -69,6 +69,8 @@
 #include <pico/multicore.h>
 
 mutex_t updatingPostion;
+mutex_t updatingBlink;
+mutex_t testMutex;
 bool setupDone = false; // Indicate to second core when setup is done
 
 // Global eye state that applies to all eyes (not per-eye):
@@ -192,7 +194,9 @@ void setup() {
   //while(!Serial) yield();
 
   mutex_init(&updatingPostion);
-
+  mutex_init(&updatingBlink);
+  mutex_init(&testMutex);
+ 
   if(!arcada.arcadaBegin())     fatal("Arcada init fail!", 100);
   if(!arcada.filesysBeginMSD(ARCADA_FILESYS_QSPI)) fatal("No filesystem found!", 250);
 
@@ -277,7 +281,7 @@ Serial.println("Initialize DMAs");
     eye[e].iris.mirror       = 0;
     eye[e].iris.spin         = 0.0;
     eye[e].iris.iSpin        = 0;
-    eye[e].sclera.color      = 0xFFFF;
+    eye[e].sclera.color      = 0xC618; //0xFFFF
     eye[e].sclera.data       = NULL;
     eye[e].sclera.filename   = NULL;
     eye[e].sclera.startAngle = (e & 1) ? 512 : 0; // Rotate alternate eyes 180 degrees
@@ -550,12 +554,18 @@ an independent frame rate depending on particular complexity at the moment).
 
 // loop() function processes ONE COLUMN of ONE EYE...
 void eyeLoop(int eyeNum) {
- uint8_t  x = eye[eyeNum].colNum;
+  uint8_t  x = eye[eyeNum].colNum;
   uint32_t t = micros();
 
   // If next column for this eye is not yet rendered...
   if(!eye[eyeNum].column_ready) {
     if(!x) { // If it's the first column...
+      // Ensure both eyes are ready for the next frame
+      rp2040.fifo.push(eyeNum);
+      uint32_t p = rp2040.fifo.pop();
+    
+      mutex_enter_blocking(&testMutex);
+
       // ONCE-PER-FRAME EYE ANIMATION LOGIC HAPPENS HERE -------------------
 
       // Eye movement
@@ -641,6 +651,7 @@ void eyeLoop(int eyeNum) {
 
       // Similar to the autonomous eye movement above -- blink start times
       // and durations are random (within ranges).
+      mutex_enter_blocking(&updatingBlink);
       if((t - timeOfLastBlink) >= timeToNextBlink) { // Start new blink?
         timeOfLastBlink = t;
         uint32_t blinkDuration = random(36000, 72000); // ~1/28 - ~1/14 sec
@@ -654,6 +665,7 @@ void eyeLoop(int eyeNum) {
         }
         timeToNextBlink = blinkDuration * 3 + random(4000000);
       }
+      mutex_exit(&updatingBlink);
 
       float uq, lq; // So many sloppy temp vars in here for now, sorry
       if(tracking) {
@@ -687,6 +699,7 @@ void eyeLoop(int eyeNum) {
       eye[eyeNum].lowerLidFactor = (eye[eyeNum].lowerLidFactor * 0.6) + (lq * 0.4);
 
       // Process blinks
+      mutex_enter_blocking(&updatingBlink);
       if(eye[eyeNum].blink.state) { // Eye currently blinking?
         // Check if current blink state time has elapsed
         if((t - eye[eyeNum].blink.startTime) >= eye[eyeNum].blink.duration) {
@@ -703,6 +716,7 @@ void eyeLoop(int eyeNum) {
           if(eye[eyeNum].blink.state == DEBLINK) eye[eyeNum].blinkFactor = 1.0 - eye[eyeNum].blinkFactor;
         }
       }
+      mutex_exit(&updatingBlink);
 
       // Periodically report frame rate. Really this is "total number of
       // eyeballs drawn." If there are two eyes, the overall refresh rate
@@ -743,7 +757,7 @@ void eyeLoop(int eyeNum) {
       }
 
       // END ONCE-PER-FRAME EYE ANIMATION ----------------------------------
-
+      mutex_exit(&testMutex);
     } // end first-scanline check
 
     // PER-COLUMN RENDERING ------------------------------------------------
@@ -764,10 +778,8 @@ void eyeLoop(int eyeNum) {
     if(upperOpen[lidColumn] == 255) {
       // No eyelid data for this line; eyelid image is smaller than screen.
       // Great! Make a full scanline of nothing, no rendering needed:
-      //d->BTCTRL.bit.SRCINC = 0;
-      //d->BTCNT.reg         = DISPLAY_SIZE * 2;
-      //d->SRCADDR.reg       = (uint32_t)&eyelidIndex;
-      //d->DESCADDR.reg      = 0; // No linked descriptor
+      uint16_t *ptr = eye[eyeNum].column[eye[eyeNum].colIdx].renderBuf;
+      for(int y = 0; y<DISPLAY_SIZE; y++) *ptr++ = eyelidColor;
     } else {
       y1 = lowerClosed[lidColumn] + (int)(0.5 + lowerLidFactor *
         (float)((int)lowerOpen[lidColumn] - (int)lowerClosed[lidColumn]));
@@ -779,20 +791,14 @@ void eyeLoop(int eyeNum) {
       else if(y2 < 0) y2 = 0;
       if(y1 >= y2) {
         // Eyelid is fully or partially closed, enough that there are no
-        // pixels to be rendered for this line. Make "nothing," as above.
-        //d->BTCTRL.bit.SRCINC = 0;
-        //d->BTCNT.reg         = DISPLAY_SIZE * 2;
-        //d->SRCADDR.reg       = (uint32_t)&eyelidIndex;
-        //d->DESCADDR.reg      = 0; // No linked descriptors
+        // pixels to be rendered for this line. Make "nothing," as above.      
+        uint16_t *ptr = eye[eyeNum].column[eye[eyeNum].colIdx].renderBuf;
+        for(int y = 0; y<DISPLAY_SIZE; y++) *ptr++ = eyelidColor;
       } else {
         // If single eye, dynamically build descriptor list as needed,
         // else use a single descriptor & fully buffer each line.
         // Full column will be rendered; DISPLAY_SIZE pixels, point source to end of
         // renderBuf and enable source increment.
-        //d->BTCTRL.bit.SRCINC = 1;
-        //d->BTCNT.reg         = DISPLAY_SIZE * 2;
-        //d->SRCADDR.reg       = (uint32_t)eye[eyeNum].column[eye[eyeNum].colIdx].renderBuf + DISPLAY_SIZE * 2;
-        //d->DESCADDR.reg      = 0; // No linked descriptors
 
         // Render column 'x' into eye's next available renderBuf
         uint16_t *ptr = eye[eyeNum].column[eye[eyeNum].colIdx].renderBuf;
@@ -1002,6 +1008,7 @@ void eyeLoop(int eyeNum) {
 void loop() {
   //if(++eyeNum >= NUM_EYES) eyeNum = 0; // Cycle through eyes...
   eyeLoop(0);
+  //eyeLoop(1);
 }
 
 void loop1() {
