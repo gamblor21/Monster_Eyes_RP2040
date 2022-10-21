@@ -53,6 +53,8 @@
 #define GLOBAL_VAR
 #include "globals.h"
 
+bool setupDone = false; // Indicate to second core when setup is done
+
 // Global eye state that applies to all eyes (not per-eye):
 bool     eyeInMotion = false;
 float    eyeOldX, eyeOldY, eyeNewX, eyeNewY;
@@ -479,8 +481,20 @@ Serial.println("Initialize DMAs");
 
   lastLightReadTime = micros() + 2000000; // Delay initial light reading
 
-  blinkLED(6, 250);
+  setupDone = true;
   Serial.println("End of setup");
+}
+
+void setup1() {
+  if (NUM_EYES == 1) {
+    while(true) {
+      delay(10000);
+    }
+  }
+  
+  while (!setupDone) {
+    yield();
+  }
 }
 
 
@@ -517,11 +531,8 @@ an independent frame rate depending on particular complexity at the moment).
 */
 
 // loop() function processes ONE COLUMN of ONE EYE...
-
-void loop() {
-  if(++eyeNum >= NUM_EYES) eyeNum = 0; // Cycle through eyes...
-
-  uint8_t  x = eye[eyeNum].colNum;
+void eyeLoop(int eyeNum) {
+ uint8_t  x = eye[eyeNum].colNum;
   uint32_t t = micros();
 
   // If next column for this eye is not yet rendered...
@@ -964,5 +975,17 @@ void loop() {
     eye[eyeNum].colNum      = 0;    // Wrap to beginning
   }
   eye[eyeNum].colIdx       ^= 1;    // Alternate 0/1 line structs
-  eye[eyeNum].column_ready = false; // OK to render next line
+  eye[eyeNum].column_ready = false; // OK to render next line 
+}
+
+void loop() {
+  //if(++eyeNum >= NUM_EYES) eyeNum = 0; // Cycle through eyes...
+  eyeLoop(0);
+}
+
+void loop1() {
+  // Was exiting after one run, while loop stops that until i can look why
+  while (true) {
+    eyeLoop(1);
+  }
 }
