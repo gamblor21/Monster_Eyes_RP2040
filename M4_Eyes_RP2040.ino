@@ -93,8 +93,21 @@ static void dma_callback() {
   // (freeing up a few cycles vs. this channel-to-eye lookup), but it's
   // written this way to scale to as many eyes as needed (up to one per
   // SERCOM if this is ported to something like Grand Central).
-  eye[0].dma_busy = false; // FIX for two eyes static bool dma_channel_get_irq0_status	(	uint 	channel	)	
-  dma_hw->ints0 = 1u << eye[0].dma_channel;
+
+  for(uint8_t e=0; e<NUM_EYES; e++) {  
+    if (dma_channel_get_irq0_status(eye[e].dma_channel)) {
+      eye[e].dma_busy = false; 
+      dma_hw->ints0 = 1u << eye[e].dma_channel;
+      return;
+    }
+  }
+}
+
+static void dma_callback1() {
+  if (dma_channel_get_irq1_status(eye[1].dma_channel)) {
+    eye[1].dma_busy = false; 
+    dma_hw->ints1 = 1u << eye[1].dma_channel;
+  }
 }
 
 // >50MHz SPI was fun but just too glitchy to rely on
@@ -156,31 +169,16 @@ void blinkLED(int t, int d) {
     i++;
   }
 }
-//#include <Adafruit_TinyUSB.h>
-//Adafruit_USBD_CDC USBSer1;
 
 // SETUP FUNCTION - CALLED ONCE AT PROGRAM START ---------------------------
 void setup() {
-  pinMode(LED_BUILTIN, OUTPUT);
-
-  blinkLED(2, 1000);
   Serial.end();
- 
   //while(!Serial) yield();
-  //while(!Serial) { }
 
   if(!arcada.arcadaBegin())     fatal("Arcada init fail!", 100);
-
-  blinkLED(4, 250);
-
   if(!arcada.filesysBeginMSD(ARCADA_FILESYS_QSPI)) fatal("No filesystem found!", 250);
 
   Serial.begin(115200);
-  yield();
-    delay(5000);
-  //while (!USBSer1) { yield(); }
-  Serial.printf("Hi there %d\n", NUM_EYES);
-  TinyUSB_Device_FlushCDC();
   yield();
   
   user_setup();
@@ -203,16 +201,6 @@ void setup() {
   // DO THIS BEFORE THE SPLASH SO IT DOESN'T REQUIRE A LENGTHY HOLD.
   char *filename = (char *)"config.eye";
 
-  //uint32_t buttonState = arcada.readButtons();
-  //if((buttonState & ARCADA_BUTTONMASK_UP) && arcada.exists("config1.eye")) {
-    //filename = (char *)"config1.eye";
-  //} else if((buttonState & ARCADA_BUTTONMASK_A) && arcada.exists("config2.eye")) {
-//    filename = (char *)"config2.eye";
-//  } else if((buttonState & ARCADA_BUTTONMASK_DOWN) && arcada.exists("config3.eye")) {
-    //filename = (char *)"config3.eye";
-  //}
-
-
   yield();
   
   // Initialize display(s)
@@ -230,48 +218,30 @@ Serial.println("Initialize DMAs");
 
   uint8_t e;
   for(e=0; e<NUM_EYES; e++) {
-#if (ARCADA_TFT_WIDTH != 160) && (ARCADA_TFT_HEIGHT != 128) // 160x128 is ST7735 which isn't able to deal
-    //eye[e].spi->setClockSource(DISPLAY_CLKSRC); // Accelerate SPI!
-#endif
     eye[e].display->fillScreen(0);
+    
     eye[e].dma_channel =  dma_claim_unused_channel(true);
     eye[e].dma_config = dma_channel_get_default_config(eye[e].dma_channel);  
     channel_config_set_transfer_data_size(&eye[e].dma_config, DMA_SIZE_8);
-    channel_config_set_dreq(&eye[e].dma_config, spi_get_dreq(spi0, true));
+    channel_config_set_dreq(&eye[e].dma_config, spi_get_dreq(eye[e].rp2040_spi, true)); //RP2040 spi_inst_t object
 
-    dma_channel_configure(eye[eyeNum].dma_channel, 
-      &eye[eyeNum].dma_config,
-      &spi_get_hw(spi0)->dr, // write address
+    dma_channel_configure(eye[e].dma_channel, 
+      &eye[e].dma_config,
+      &spi_get_hw(eye[e].rp2040_spi)->dr, // write address
       NULL, // read address - for now
       DISPLAY_SIZE*2, // element count (each element is of size transfer_data_size)
       false); // do not start
-
-    dma_channel_set_irq0_enabled(eye[eyeNum].dma_channel, true);
-    irq_set_exclusive_handler(DMA_IRQ_0, dma_callback);
-    irq_set_enabled(DMA_IRQ_0, true);    
-
-    //eye[e].dma.allocate();
-    //eye[e].dma.setTrigger(eye[e].spi->getDMAC_ID_TX());
-    //eye[e].dma.setAction(DMA_TRIGGER_ACTON_BEAT);
-    //eye[e].dptr = eye[e].dma.addDescriptor(NULL, NULL, 42, DMA_BEAT_SIZE_BYTE, false, false);
-    //eye[e].dma.setCallback(dma_callback);
-    //eye[e].dma.setPriority(DMA_PRIORITY_0);
     
-    //uint32_t spi_data_reg = (uint32_t)eye[e].spi->getDataRegister();
-    for(int i=0; i<2; i++) {   // For each of 2 scanlines...
-      for(int j=0; j<NUM_DESCRIPTORS; j++) { // For each descriptor on scanline...
-      
-        //eye[e].column[i].descriptor[j].BTCTRL.bit.VALID    = true;
-        //eye[e].column[i].descriptor[j].BTCTRL.bit.EVOSEL   = DMA_EVENT_OUTPUT_DISABLE;
-        //eye[e].column[i].descriptor[j].BTCTRL.bit.BLOCKACT = DMA_BLOCK_ACTION_NOACT;
-        //eye[e].column[i].descriptor[j].BTCTRL.bit.BEATSIZE = DMA_BEAT_SIZE_BYTE;
-        //eye[e].column[i].descriptor[j].BTCTRL.bit.DSTINC   = 0;
-        //eye[e].column[i].descriptor[j].BTCTRL.bit.STEPSEL  = DMA_STEPSEL_SRC;
-        //eye[e].column[i].descriptor[j].BTCTRL.bit.STEPSIZE = DMA_ADDRESS_INCREMENT_STEP_SIZE_1;
-        //eye[e].column[i].descriptor[j].DSTADDR.reg         = spi_data_reg;
-        
-      }
+    if (e == 0) {
+      dma_channel_set_irq0_enabled(eye[e].dma_channel, true);
+      irq_set_exclusive_handler(DMA_IRQ_0, dma_callback);
+      irq_set_enabled(DMA_IRQ_0, true);
+    } else {
+      dma_channel_set_irq1_enabled(eye[e].dma_channel, true);
+      irq_set_exclusive_handler(DMA_IRQ_1, dma_callback1);
+      irq_set_enabled(DMA_IRQ_1, true);
     }
+
     eye[e].colNum       = DISPLAY_SIZE; // Force initial wraparound to first column
     eye[e].colIdx       = 0;
     eye[e].dma_busy     = false;
@@ -706,8 +676,9 @@ void loop() {
       // eyeballs drawn." If there are two eyes, the overall refresh rate
       // of both screens is about 1/2 this.
       frames++;
-      if(((t - lastFrameRateReportTime) >= 1000000) && t) { // Once per sec.
-        Serial.println((frames * 1000) / (t / 1000));
+      if(((t - lastFrameRateReportTime) >= 10000000) && t) { // Once per sec.
+        Serial.println(frames/10);
+        frames = 0;
         lastFrameRateReportTime = t;
       }
 
@@ -757,8 +728,6 @@ void loop() {
 
     int y1, y2;
     int lidColumn = (eyeNum & 1) ? (DISPLAY_SIZE - 1 - x) : x; // Reverse eyelid columns for left eye
-
-    //DmacDescriptor *d = &eye[eyeNum].column[eye[eyeNum].colIdx].descriptor[0];
 
     if(upperOpen[lidColumn] == 255) {
       // No eyelid data for this line; eyelid image is smaller than screen.
@@ -909,7 +878,8 @@ void loop() {
     // in the DMAbuddy.h file and above the DMA_TIMEOUT declaration earlier
     // in this code). Take action!
     // digitalWrite(13, HIGH);
-    Serial.printf("Eye #%d stalled, resetting DMA channel...\n", eyeNum);
+    blinkLED(1, 1);
+    //Serial.printf("Eye #%d stalled...\n", eyeNum);
     //eye[eyeNum].dma.fix();
     // If this somehow proves to be inadequate, we still have the Nuclear
     // Option of just completely restarting the sketch from the beginning,
@@ -986,36 +956,13 @@ void loop() {
     boopSum += readBoop();
   }
 
-  //memcpy(eye[eyeNum].dptr, &eye[eyeNum].column[eye[eyeNum].colIdx].descriptor[0], sizeof(DmacDescriptor));
-  //eye[eyeNum].dma.startJob();
-  
-
   eye[eyeNum].dma_busy       = true;
   eye[eyeNum].dmaStartTime   = micros();
   dma_channel_set_read_addr(eye[eyeNum].dma_channel, eye[eyeNum].column[eye[eyeNum].colIdx].renderBuf, true);
-  
-  
-  /*dma_channel_configure(eye[eyeNum].dma_channel, 
-    &eye[eyeNum].dma_config,
-    &spi_get_hw(spi0)->dr, // write address
-    eye[eyeNum].column[eye[eyeNum].colIdx].renderBuf, // read address
-    DISPLAY_SIZE, // element count (each element is of size transfer_data_size)
-    true); // start immediate*/
-
-  //dma_start_channel_mask(1u << eye[eyeNum].dma_channel);
-  //dma_channel_wait_for_finish_blocking(eye[eyeNum].dma_channel);
-  //while (dma_channel_is_busy(eye[eyeNum].dma_channel)) {
-    //yield();//Serial.print(".");
-  //}
-    
-  //eye[eyeNum].display->writePixels(eye[eyeNum].column[eye[eyeNum].colIdx].renderBuf, DISPLAY_SIZE);
 
   if(++eye[eyeNum].colNum >= DISPLAY_SIZE) { // If last line sent...
     eye[eyeNum].colNum      = 0;    // Wrap to beginning
   }
   eye[eyeNum].colIdx       ^= 1;    // Alternate 0/1 line structs
   eye[eyeNum].column_ready = false; // OK to render next line
-  
-  //yield();
-  //TinyUSB_Device_FlushCDC();
 }

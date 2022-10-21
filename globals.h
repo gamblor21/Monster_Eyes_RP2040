@@ -124,7 +124,6 @@ GLOBAL_VAR uint32_t modulate GLOBAL_INIT(30);  // Dalek pitch
   // (since only one channel) and we can still use the hack for HalloWing M4.
 typedef struct {
   uint16_t renderBuf[MAX_DISPLAY_SIZE];  // Pixel buffer
-  //DmacDescriptor descriptor[NUM_DESCRIPTORS]; // DMA descriptor list
 } columnStruct;
 
 // A simple state machine is used to control eye blinks/winks:
@@ -159,6 +158,7 @@ typedef struct {
   // These first values are initialized in the tables below:
   const char *name;  // For loading per-eye configurables
   SPIClass *spi;     // Pointer to corresponding SPI object
+  spi_inst_t *rp2040_spi; // Pointer to RP2040 SPI object
   int8_t cs;         // CS pin #
   int8_t dc;         // DC pin #
   int8_t rst;        // RST pin # (-1 if using Seesaw)
@@ -166,9 +166,7 @@ typedef struct {
   // Remaining values are initialized in code:
   columnStruct column[2];    // Alternating column structures A/B
   Adafruit_SPITFT *display;  // Pointer to display object
-  //DMAbuddy         dma;          // DMA channel object with fix() function
-  //DmacDescriptor  *dptr;         // DMA channel descriptor pointer
-  uint dma_channel; // DMA channel
+  uint dma_channel;          // DMA channel
   dma_channel_config dma_config; // DMA config
   uint32_t dmaStartTime;  // For DMA timeout handler
   uint8_t colNum;         // Column counter (0-239)
@@ -196,11 +194,11 @@ typedef struct {
 eyeStruct eye[NUM_EYES] = {
 #if (NUM_EYES > 1)
   // name     spi  cs  dc rst wink
-  { "right", &ARCADA_TFT_SPI, ARCADA_TFT_CS, ARCADA_TFT_DC, ARCADA_TFT_RST, -1 },
-  { "left", &ARCADA_LEFTTFT_SPI, ARCADA_LEFTTFT_CS, ARCADA_LEFTTFT_DC, ARCADA_LEFTTFT_RST, -1 }
+  { "right", &ARCADA_TFT_SPI, ARCADA_TFT_RP2040_SPI, ARCADA_TFT_CS, ARCADA_TFT_DC, ARCADA_TFT_RST, -1 },
+  { "left", &ARCADA_LEFTTFT_SPI, ARCADA_LEFTTFT_RP2040_SPI, ARCADA_LEFTTFT_CS, ARCADA_LEFTTFT_DC, ARCADA_LEFTTFT_RST, -1 }
 };
 #else
-  { NULL, &ARCADA_TFT_SPI, ARCADA_TFT_CS, ARCADA_TFT_DC, ARCADA_TFT_RST, -1 }
+  { NULL, &ARCADA_TFT_SPI, ARCADA_TFT_RP2040_SPI, ARCADA_TFT_CS, ARCADA_TFT_DC, ARCADA_TFT_RST, -1 }
 };
 #endif
 #else
