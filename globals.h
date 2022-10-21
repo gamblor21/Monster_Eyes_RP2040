@@ -27,7 +27,7 @@
 
 GLOBAL_VAR Adafruit_Arcada arcada;
 
-GLOBAL_VAR bool showSplashScreen GLOBAL_INIT(true);  // Clear to suppress the splash screen
+GLOBAL_VAR bool showSplashScreen GLOBAL_INIT(false);  // Clear to suppress the splash screen
 
 #define MAX_DISPLAY_SIZE 240
 GLOBAL_VAR int DISPLAY_SIZE GLOBAL_INIT(240);         // Start with assuming a 240x240 display
@@ -188,6 +188,8 @@ typedef struct {
   float pupilFactor;  // ditto
   float blinkFactor;
   float upperLidFactor, lowerLidFactor;
+  uint32_t frames;
+  uint32_t lastFrameRateReportTime;  
 } eyeStruct;
 
 #ifdef INIT_EYESTRUCTS

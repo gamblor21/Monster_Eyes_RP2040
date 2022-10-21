@@ -1,3 +1,16 @@
+// SPDX-FileCopyrightText: 2022 Mark Komus
+//
+// SPDX-License-Identifier: MIT
+
+// Modified from the original Adafruit M4 eyes for the MONSTER MASK and
+// HALLOWING M4 boards to run on RP2040 based boards. This project will
+// not work without also modifying the Adafruit Arcada library to use 
+// the RP2040 which can be found currently in a fork of the Arcada
+// project I created.
+//
+// This code is a work in progress and it is likely there are still
+// optimizations left to be done and errors left to be found.
+
 // SPDX-FileCopyrightText: 2019 Phillip Burgess for Adafruit Industries
 //
 // SPDX-License-Identifier: MIT
@@ -53,6 +66,9 @@
 #define GLOBAL_VAR
 #include "globals.h"
 
+#include <pico/multicore.h>
+
+mutex_t updatingPostion;
 bool setupDone = false; // Indicate to second core when setup is done
 
 // Global eye state that applies to all eyes (not per-eye):
@@ -70,8 +86,6 @@ uint32_t timeOfLastBlink         = 0L,
 int      xPositionOverMap        = 0;
 int      yPositionOverMap        = 0;
 uint8_t  eyeNum                  = 0;
-uint32_t frames                  = 0;
-uint32_t lastFrameRateReportTime = 0;
 uint32_t lastLightReadTime       = 0;
 float    lastLightValue          = 0.5;
 double   irisValue               = 0.5;
@@ -177,6 +191,8 @@ void setup() {
   Serial.end();
   //while(!Serial) yield();
 
+  mutex_init(&updatingPostion);
+
   if(!arcada.arcadaBegin())     fatal("Arcada init fail!", 100);
   if(!arcada.filesysBeginMSD(ARCADA_FILESYS_QSPI)) fatal("No filesystem found!", 250);
 
@@ -274,6 +290,8 @@ Serial.println("Initialize DMAs");
     // Uncanny eyes carryover stuff for now, all messy:
     eye[e].blink.state = NOBLINK;
     eye[e].blinkFactor = 0.0;
+    eye[e].frames = 0;
+    eye[e].lastFrameRateReportTime = 0;
   }
 
   Serial.println("Splash Screen time");
@@ -568,6 +586,8 @@ void eyeLoop(int eyeNum) {
         } else {                       // Eye is currently stopped
           eyeX = eyeOldX;
           eyeY = eyeOldY;
+          
+          mutex_enter_blocking(&updatingPostion);
           if(dt > eyeMoveDuration) {   // Time up?  Begin new move.
             if((t - lastSaccadeStop) > saccadeInterval) { // Time for a "big" saccade
               // r is the radius in X and Y that the eye can go, from (0,0) in the center.
@@ -595,6 +615,7 @@ void eyeLoop(int eyeNum) {
             eyeMoveStartTime = t;    // Save initial time of move
             eyeInMotion      = true; // Start move on next frame
           }
+          mutex_exit(&updatingPostion);
         }
       } else {
         // Allow user code to control eye position (e.g. IR sensor, joystick, etc.)
@@ -686,11 +707,11 @@ void eyeLoop(int eyeNum) {
       // Periodically report frame rate. Really this is "total number of
       // eyeballs drawn." If there are two eyes, the overall refresh rate
       // of both screens is about 1/2 this.
-      frames++;
-      if(((t - lastFrameRateReportTime) >= 10000000) && t) { // Once per sec.
-        Serial.println(frames/10);
-        frames = 0;
-        lastFrameRateReportTime = t;
+      eye[eyeNum].frames++;
+      if(((t - eye[eyeNum].lastFrameRateReportTime) >= 10000000) && t) { // Once per sec.
+        Serial.printf("%d:%dfps\n", eyeNum, eye[eyeNum].frames/10);
+        eye[eyeNum].frames = 0;
+        eye[eyeNum].lastFrameRateReportTime = t;
       }
 
       // Once per frame (of eye #0), reset boopSum...
