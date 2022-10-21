@@ -12,3 +12,4 @@ Changed libraries:
 Adafruit Arcada (Board definition, Adafruit_Arcada_InternalFlash.cpp and Adafruit_Arcada_Filesystem.cpp)
 
 Changes can be found in my fork https://github.com/gamblor21/Adafruit_Arcada
+You will have to manually install this library as it is not in the Arduino library manager.
